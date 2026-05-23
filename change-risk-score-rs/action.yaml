@@ -1,0 +1,98 @@
+# NOTE: requires pull-requests: write permissions to post PR comments.
+
+name: 'Change Risk Score (Rust)'
+description: 'Compute CRAP change risk scores for a Rust crate using cargo-crap and cargo-llvm-cov'
+inputs:
+  rust-toolchain:
+    description: 'Rust toolchain to install'
+    required: false
+    default: 'stable'
+  working-directory:
+    description: 'Working directory containing Cargo.toml'
+    required: false
+    default: '.'
+  threshold:
+    description: 'CRAP score above which a function is flagged'
+    required: false
+    default: '30'
+  top:
+    description: 'Show only N worst offenders in the PR comment (empty = show all)'
+    required: false
+    default: ''
+  workspace:
+    description: 'Analyze all Cargo workspace members'
+    required: false
+    default: 'false'
+  fail-above:
+    description: 'Fail the action if any function exceeds the threshold'
+    required: false
+    default: 'true'
+  post-pr-comment:
+    description: 'Post the CRAP report as a PR comment when running on a pull_request event'
+    required: false
+    default: 'true'
+  github-token:
+    description: 'Token used to post the PR comment'
+    required: false
+    default: ${{ github.token }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        toolchain: ${{ inputs.rust-toolchain }}
+        components: llvm-tools-preview
+
+    - name: Install cargo-llvm-cov
+      uses: taiki-e/install-action@cargo-llvm-cov
+
+    - name: Install cargo-crap
+      shell: bash
+      run: cargo install cargo-crap
+
+    - name: Generate coverage (lcov)
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: cargo llvm-cov --lcov --output-path lcov.info
+
+    - name: Render CRAP report
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        ARGS=(--lcov lcov.info --threshold "${{ inputs.threshold }}" --format pr-comment --output crap-report.md)
+        if [ -n "${{ inputs.top }}" ]; then
+          ARGS+=(--top "${{ inputs.top }}")
+        fi
+        if [ "${{ inputs.workspace }}" = "true" ]; then
+          ARGS+=(--workspace)
+        fi
+        cargo crap "${ARGS[@]}"
+
+    - name: Append report to job summary
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: cat crap-report.md >> "$GITHUB_STEP_SUMMARY"
+
+    - name: Post PR comment
+      if: github.event_name == 'pull_request' && inputs.post-pr-comment == 'true'
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+      run: |
+        gh pr comment "${{ github.event.pull_request.number }}" \
+          --repo "${{ github.repository }}" \
+          --body-file crap-report.md
+
+    - name: Enforce CRAP threshold
+      if: inputs.fail-above == 'true'
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        ARGS=(--lcov lcov.info --threshold "${{ inputs.threshold }}" --fail-above --format human)
+        if [ "${{ inputs.workspace }}" = "true" ]; then
+          ARGS+=(--workspace)
+        fi
+        cargo crap "${ARGS[@]}"
