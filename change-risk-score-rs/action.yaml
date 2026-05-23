@@ -40,7 +40,7 @@ runs:
   using: 'composite'
   steps:
     - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@stable
+      uses: actions-rust-lang/setup-rust-toolchain@v1
       with:
         toolchain: ${{ inputs.rust-toolchain }}
         components: llvm-tools-preview
@@ -49,8 +49,9 @@ runs:
       uses: taiki-e/install-action@cargo-llvm-cov
 
     - name: Install cargo-crap
-      shell: bash
-      run: cargo install cargo-crap
+      uses: baptiste0928/cargo-install@v3
+      with:
+        crate: cargo-crap
 
     - name: Generate coverage (lcov)
       shell: bash
