@@ -71,7 +71,9 @@ runs:
       if: inputs.svelte == 'true'
       shell: bash
       working-directory: ${{ github.action_path }}
-      run: npm install --no-audit --no-fund --silent svelte-eslint-parser
+      # svelte is a peer dep of svelte-eslint-parser (optional, so npm doesn't
+      # auto-install it); the parser imports svelte's compiler at runtime.
+      run: npm install --no-audit --no-fund --silent svelte-eslint-parser svelte
 
     - name: Compute CRAP scores
       shell: bash
