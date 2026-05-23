@@ -1,0 +1,100 @@
+# NOTE: requires pull-requests: write permissions to post PR comments.
+# The caller is responsible for producing coverage.xml (Cobertura format)
+# from coverage.py before invoking this action — e.g.:
+#   coverage run -m pytest && coverage xml
+
+name: 'Change Risk Score (Python)'
+description: 'Compute CRAP change risk scores for a Python project from radon and a Cobertura coverage.xml'
+inputs:
+  python-version:
+    description: 'Python version to use'
+    required: false
+    default: '3.11'
+  working-directory:
+    description: 'Working directory'
+    required: false
+    default: '.'
+  source-path:
+    description: 'Path that radon should analyze (file or directory)'
+    required: false
+    default: '.'
+  coverage-xml-path:
+    description: 'Path to Cobertura XML produced by coverage.py'
+    required: false
+    default: 'coverage.xml'
+  threshold:
+    description: 'CRAP score above which a function is flagged'
+    required: false
+    default: '30'
+  top:
+    description: 'Show only N worst offenders in the PR comment (empty = show all)'
+    required: false
+    default: '25'
+  missing-coverage-policy:
+    description: 'How to score functions with no coverage data: pessimistic (treat as 0% covered), optimistic (100%), or skip'
+    required: false
+    default: 'pessimistic'
+  fail-above:
+    description: 'Fail the action if any function exceeds the threshold'
+    required: false
+    default: 'true'
+  post-pr-comment:
+    description: 'Post the CRAP report as a PR comment when running on a pull_request event'
+    required: false
+    default: 'true'
+  github-token:
+    description: 'Token used to post the PR comment'
+    required: false
+    default: ${{ github.token }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    - name: Install radon
+      shell: bash
+      run: pip install --quiet radon
+
+    - name: Compute CRAP scores
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        python "${{ github.action_path }}/score.py" \
+          --source-path "${{ inputs.source-path }}" \
+          --coverage-xml "${{ inputs.coverage-xml-path }}" \
+          --threshold "${{ inputs.threshold }}" \
+          --top "${{ inputs.top }}" \
+          --missing-policy "${{ inputs.missing-coverage-policy }}" \
+          --output-file crap-report.md \
+          --violations-file crap-violations.txt
+
+    - name: Append report to job summary
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: cat crap-report.md >> "$GITHUB_STEP_SUMMARY"
+
+    - name: Post PR comment
+      if: github.event_name == 'pull_request' && inputs.post-pr-comment == 'true'
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+      run: |
+        gh pr comment "${{ github.event.pull_request.number }}" \
+          --repo "${{ github.repository }}" \
+          --body-file crap-report.md
+
+    - name: Enforce CRAP threshold
+      if: inputs.fail-above == 'true'
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        if [ -s crap-violations.txt ]; then
+          echo "Functions exceeding CRAP threshold ${{ inputs.threshold }}:"
+          cat crap-violations.txt
+          exit 1
+        fi
