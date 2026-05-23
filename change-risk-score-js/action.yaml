@@ -1,0 +1,116 @@
+# NOTE: requires pull-requests: write permissions to post PR comments.
+# The caller is responsible for producing an lcov coverage file before
+# invoking this action — e.g. via c8, Vitest --coverage, Jest, or nyc.
+
+name: 'Change Risk Score (JavaScript/TypeScript)'
+description: 'Compute CRAP change risk scores for JS/TS (and optionally Svelte) projects using ESLint and an lcov coverage file'
+inputs:
+  node-version:
+    description: 'Node.js version to use'
+    required: false
+    default: '20'
+  working-directory:
+    description: 'Working directory'
+    required: false
+    default: '.'
+  source-path:
+    description: 'Path or glob ESLint should analyze'
+    required: false
+    default: 'src'
+  coverage-lcov-path:
+    description: 'Path to lcov.info coverage file (c8, Vitest, Jest, nyc all emit this)'
+    required: false
+    default: 'coverage/lcov.info'
+  extensions:
+    description: 'Comma-separated file extensions to analyze (without dots)'
+    required: false
+    default: 'js,jsx,mjs,cjs,ts,tsx,mts,cts'
+  svelte:
+    description: 'If true, also analyze .svelte files via svelte-eslint-parser'
+    required: false
+    default: 'false'
+  threshold:
+    description: 'CRAP score above which a function is flagged'
+    required: false
+    default: '30'
+  top:
+    description: 'Show only N worst offenders in the PR comment (empty = show all)'
+    required: false
+    default: '25'
+  missing-coverage-policy:
+    description: 'How to score functions with no coverage data: pessimistic (0%), optimistic (100%), or skip'
+    required: false
+    default: 'pessimistic'
+  fail-above:
+    description: 'Fail the action if any function exceeds the threshold'
+    required: false
+    default: 'true'
+  post-pr-comment:
+    description: 'Post the CRAP report as a PR comment on pull_request events'
+    required: false
+    default: 'true'
+  github-token:
+    description: 'Token used to post the PR comment'
+    required: false
+    default: ${{ github.token }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ inputs.node-version }}
+
+    - name: Install action dependencies
+      shell: bash
+      working-directory: ${{ github.action_path }}
+      run: npm install --no-audit --no-fund --silent
+
+    - name: Install Svelte parser
+      if: inputs.svelte == 'true'
+      shell: bash
+      working-directory: ${{ github.action_path }}
+      run: npm install --no-audit --no-fund --silent svelte-eslint-parser
+
+    - name: Compute CRAP scores
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        node "${{ github.action_path }}/score.mjs" \
+          --source-path "${{ inputs.source-path }}" \
+          --coverage-lcov "${{ inputs.coverage-lcov-path }}" \
+          --threshold "${{ inputs.threshold }}" \
+          --top "${{ inputs.top }}" \
+          --missing-policy "${{ inputs.missing-coverage-policy }}" \
+          --extensions "${{ inputs.extensions }}" \
+          --svelte "${{ inputs.svelte }}" \
+          --output-file crap-report.md \
+          --violations-file crap-violations.txt
+
+    - name: Append report to job summary
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: cat crap-report.md >> "$GITHUB_STEP_SUMMARY"
+
+    - name: Post PR comment
+      if: github.event_name == 'pull_request' && inputs.post-pr-comment == 'true'
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+      run: |
+        gh pr comment "${{ github.event.pull_request.number }}" \
+          --repo "${{ github.repository }}" \
+          --body-file crap-report.md
+
+    - name: Enforce CRAP threshold
+      if: inputs.fail-above == 'true'
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        if [ -s crap-violations.txt ]; then
+          echo "Functions exceeding CRAP threshold ${{ inputs.threshold }}:"
+          cat crap-violations.txt
+          exit 1
+        fi

@@ -12,6 +12,7 @@ CRAP(m) = complexity(m)² × (1 − coverage(m)/100)³ + complexity(m)
 |---|---|---|
 | [`change-risk-score-rs`](./change-risk-score-rs) | Rust | [`cargo-crap`](https://github.com/minikin/cargo-crap), `cargo-llvm-cov` |
 | [`change-risk-score-py`](./change-risk-score-py) | Python | `radon` + a Cobertura `coverage.xml` produced by the caller |
+| [`change-risk-score-js`](./change-risk-score-js) | JavaScript / TypeScript / Svelte | ESLint `complexity` rule + an `lcov.info` produced by the caller |
 
 Helm is intentionally out of scope for now — CRAP doesn't translate cleanly to Helm templates (no functions, no real coverage concept).
 
@@ -65,6 +66,37 @@ jobs:
 ```
 
 Inputs: `python-version`, `working-directory`, `source-path`, `coverage-xml-path`, `threshold`, `top`, `missing-coverage-policy` (`pessimistic` / `optimistic` / `skip`), `fail-above`, `post-pr-comment`, `github-token`.
+
+## JavaScript / TypeScript usage
+
+The caller produces an `lcov.info` before invoking the action — c8, Vitest `--coverage`, Jest, and nyc all emit this format. By default the action analyzes `.js`/`.jsx`/`.mjs`/`.cjs`/`.ts`/`.tsx`/`.mts`/`.cts`. Set `svelte: 'true'` to also analyze `.svelte` files via [svelte-eslint-parser](https://github.com/sveltejs/svelte-eslint-parser).
+
+```yaml
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  change-risk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm ci
+      - run: npx vitest run --coverage --coverage.reporter=lcov
+      - uses: kraigmcfadden/gha-actions-change-risk-score/change-risk-score-js@v1
+        with:
+          source-path: 'src'
+          coverage-lcov-path: 'coverage/lcov.info'
+          svelte: 'true'   # set for SvelteKit / Svelte apps
+          threshold: '30'
+          fail-above: 'true'
+          post-pr-comment: 'true'
+```
+
+Inputs: `node-version`, `working-directory`, `source-path`, `coverage-lcov-path`, `extensions`, `svelte`, `threshold`, `top`, `missing-coverage-policy`, `fail-above`, `post-pr-comment`, `github-token`.
 
 ## Posting PR comments
 

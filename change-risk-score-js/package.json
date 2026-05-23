@@ -1,0 +1,10 @@
+{
+  "name": "change-risk-score-js",
+  "private": true,
+  "type": "module",
+  "description": "Internal dependencies for the change-risk-score-js GitHub Action.",
+  "dependencies": {
+    "eslint": "^9.0.0",
+    "@typescript-eslint/parser": "^8.0.0"
+  }
+}
